@@ -2527,9 +2527,11 @@ FROM busybox AS build
 ARG FOO
 ARG BAR
 ARG BAZ=bazcontent
-RUN echo -n $HTTP_PROXY::$NO_PROXY::$FOO::$BAR::$BAZ > /out
+ARG QUX=
+RUN env > /env
+RUN echo -n $HTTP_PROXY::$NO_PROXY::$FOO::$BAR::$BAZ::$QUX > /out
 FROM scratch
-COPY --from=build /out /
+COPY --from=build /out /env /
 
 `)
 	dir, err := tmpdir(
@@ -2566,7 +2568,12 @@ COPY --from=build /out /
 
 	dt, err := ioutil.ReadFile(filepath.Join(destDir, "out"))
 	require.NoError(t, err)
-	require.Equal(t, "hpvalue::npvalue::foocontents::::bazcontent", string(dt))
+	require.Equal(t, "hpvalue::npvalue::foocontents::::bazcontent::", string(dt))
+
+	dt, err = ioutil.ReadFile(filepath.Join(destDir, "env"))
+	require.NoError(t, err)
+	require.NotContains(t, string(dt), "BAR=")
+	require.Contains(t, string(dt), "QUX=")
 
 	// repeat with changed default args should match the old cache
 	destDir, err = ioutil.TempDir("", "buildkit")
@@ -2592,7 +2599,7 @@ COPY --from=build /out /
 
 	dt, err = ioutil.ReadFile(filepath.Join(destDir, "out"))
 	require.NoError(t, err)
-	require.Equal(t, "hpvalue::npvalue::foocontents::::bazcontent", string(dt))
+	require.Equal(t, "hpvalue::npvalue::foocontents::::bazcontent::", string(dt))
 
 	// changing actual value invalidates cache
 	destDir, err = ioutil.TempDir("", "buildkit")
@@ -2618,7 +2625,7 @@ COPY --from=build /out /
 
 	dt, err = ioutil.ReadFile(filepath.Join(destDir, "out"))
 	require.NoError(t, err)
-	require.Equal(t, "hpvalue2::::foocontents2::::bazcontent", string(dt))
+	require.Equal(t, "hpvalue2::::foocontents2::::bazcontent::", string(dt))
 }
 
 func tmpdir(appliers ...fstest.Applier) (string, error) {

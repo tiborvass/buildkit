@@ -818,8 +818,9 @@ func dispatchArg(d *dispatchState, c *instructions.ArgCommand, metaArgs []instru
 			}
 		}
 	}
-
-	d.buildArgs = append(d.buildArgs, buildArg)
+	if buildArg.Value != nil {
+		d.buildArgs = append(d.buildArgs, buildArg)
+	}
 	return commitToHistory(&d.image, commitStr, false, nil)
 }
 
