@@ -108,9 +108,10 @@ func Build(ctx context.Context, c client.Client) (*client.Result, error) {
 	)
 	var buildContext *llb.State
 	isScratchContext := false
+	// if client specified a dockerfile directory, then the Dockerfile is expected to be in that directory instead of the build context.
+	_, dockerfileOutsideContext := opts[LocalNameDockerfile]
 	if st, ok := detectGitContext(opts[LocalNameContext]); ok {
-		src = *st
-		buildContext = &src
+		buildContext = st
 	} else if httpPrefix.MatchString(opts[LocalNameContext]) {
 		httpContext := llb.HTTP(opts[LocalNameContext], llb.Filename("context"), dockerfile2llb.WithInternalName("load remote build context"))
 		def, err := httpContext.Marshal(marshalOpts...)
@@ -146,14 +147,18 @@ func Build(ctx context.Context, c client.Client) (*client.Result, error) {
 			unpack := llb.Image(copyImage, dockerfile2llb.WithInternalName("helper image for file operations")).
 				Run(llb.Shlex("copy --unpack /src/context /out/"), llb.ReadonlyRootFS(), dockerfile2llb.WithInternalName("extracting build context"))
 			unpack.AddMount("/src", httpContext, llb.Readonly)
-			src = unpack.AddMount("/out", llb.Scratch())
-			buildContext = &src
+			st := unpack.AddMount("/out", llb.Scratch())
+			buildContext = &st
 		} else {
 			filename = "context"
-			src = httpContext
-			buildContext = &src
+			buildContext = &httpContext
 			isScratchContext = true
 		}
+	}
+
+	// if dockerfile is expected to be in build context
+	if buildContext != nil && !dockerfileOutsideContext {
+		src = *buildContext
 	}
 
 	def, err := src.Marshal(marshalOpts...)

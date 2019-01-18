@@ -2013,9 +2013,14 @@ COPY sub/dir1 subdest6
 func testDockerfileFromGit(t *testing.T, sb integration.Sandbox) {
 	f := getFrontend(t, sb)
 
-	gitDir, err := ioutil.TempDir("", "buildkit")
+	tmpDir, err := ioutil.TempDir("", "buildkit")
 	require.NoError(t, err)
-	defer os.RemoveAll(gitDir)
+	defer os.RemoveAll(tmpDir)
+
+	gitDir := filepath.Join(tmpDir, "gitdir")
+	os.MkdirAll(gitDir, 0700)
+	dockerfileDir := filepath.Join(tmpDir, "dockerfile")
+	os.MkdirAll(dockerfileDir, 0700)
 
 	dockerfile := `
 FROM busybox AS build
@@ -2041,11 +2046,12 @@ COPY --from=build foo bar
 COPY --from=build foo bar2
 `
 
-	err = ioutil.WriteFile(filepath.Join(gitDir, "Dockerfile"), []byte(dockerfile), 0600)
+	err = ioutil.WriteFile(filepath.Join(dockerfileDir, "Dockerfile"), []byte(dockerfile), 0600)
 	require.NoError(t, err)
 
 	err = runShell(gitDir,
-		"git add Dockerfile",
+		"echo hello > text",
+		"git add text",
 		"git commit -m second",
 		"git update-server-info",
 	)
@@ -2068,6 +2074,7 @@ COPY --from=build foo bar2
 		},
 		Exporter:          client.ExporterLocal,
 		ExporterOutputDir: destDir,
+		LocalDirs: map[string]string{builder.LocalNameDockerfile: dockerfileDir},
 	}, nil)
 	require.NoError(t, err)
 
@@ -2087,9 +2094,11 @@ COPY --from=build foo bar2
 	_, err = f.Solve(context.TODO(), c, client.SolveOpt{
 		FrontendAttrs: map[string]string{
 			"context": server.URL + "/.git",
+			"dockerfile": dockerfileDir,
 		},
 		Exporter:          client.ExporterLocal,
 		ExporterOutputDir: destDir,
+		LocalDirs: map[string]string{builder.LocalNameDockerfile: dockerfileDir},
 	}, nil)
 	require.NoError(t, err)
 
@@ -2120,10 +2129,10 @@ func testDockerfileFromHTTP(t *testing.T, sb integration.Sandbox) {
 		require.NoError(t, err)
 	}
 
-	writeFile("mydockerfile", `FROM scratch
+	dfContent := `FROM scratch
 COPY foo bar
-`)
-
+`
+	writeFile("mydockerfile", dfContent)
 	writeFile("foo", "foo-contents")
 
 	require.NoError(t, w.Flush())
@@ -2138,27 +2147,48 @@ COPY foo bar
 	})
 	defer server.Close()
 
-	destDir, err := ioutil.TempDir("", "buildkit")
+	tmpDir, err := ioutil.TempDir("", "buildkit")
 	require.NoError(t, err)
-	defer os.RemoveAll(destDir)
+	defer os.RemoveAll(tmpDir)
+
+	destDir := filepath.Join(tmpDir, "dest")
+	dockerfileDir := filepath.Join(tmpDir, "dockerfile")
+	os.MkdirAll(dockerfileDir, 0700)
+	ioutil.WriteFile(filepath.Join(dockerfileDir, "outsideDockerfile"), []byte(dfContent), 0600)
 
 	c, err := client.New(context.TODO(), sb.Address())
 	require.NoError(t, err)
 	defer c.Close()
 
-	_, err = f.Solve(context.TODO(), c, client.SolveOpt{
-		FrontendAttrs: map[string]string{
-			"context":  server.URL + "/myurl",
-			"filename": "mydockerfile",
-		},
-		Exporter:          client.ExporterLocal,
-		ExporterOutputDir: destDir,
-	}, nil)
-	require.NoError(t, err)
+	for filename, dockerfileOutsideContext := range map[string]bool{
+		"mydockerfile": false,
+		"outsideDockerfile": true,
+	} {
 
-	dt, err := ioutil.ReadFile(filepath.Join(destDir, "bar"))
-	require.NoError(t, err)
-	require.Equal(t, "foo-contents", string(dt))
+		solveOpt := client.SolveOpt{
+			FrontendAttrs: map[string]string{
+				"context":  server.URL + "/myurl",
+				"filename": filename,
+			},
+			Exporter:          client.ExporterLocal,
+			ExporterOutputDir: destDir,
+		}
+		if dockerfileOutsideContext {
+			solveOpt.LocalDirs = map[string]string{builder.LocalNameDockerfile: dockerfileDir}
+			solveOpt.FrontendAttrs["dockerfile"] = dockerfileDir
+		}
+
+		os.MkdirAll(destDir, 0700)
+		_, err = f.Solve(context.TODO(), c, solveOpt, nil)
+		msg := fmt.Sprintf("dockerfileOutsideContext = %t", dockerfileOutsideContext)
+		require.NoError(t, err, msg)
+
+		dt, err := ioutil.ReadFile(filepath.Join(destDir, "bar"))
+		require.NoError(t, err, msg)
+		require.Equal(t, "foo-contents", string(dt), msg)
+		os.RemoveAll(destDir)
+
+	}
 }
 
 func testMultiStageImplicitFrom(t *testing.T, sb integration.Sandbox) {
