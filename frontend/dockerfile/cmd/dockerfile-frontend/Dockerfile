@@ -1,4 +1,5 @@
-FROM --platform=$BUILDPLATFORM golang:1.10-alpine AS builder
+#FROM --platform=$BUILDPLATFORM golang:1.10-alpine AS builder
+FROM i386/golang:1.10-alpine AS builder
 ARG BUILDTAGS=""
 COPY . /go/src/github.com/moby/buildkit
 ARG TARGETOS
