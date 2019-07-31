@@ -705,11 +705,15 @@ func dispatchCopyFileOp(d *dispatchState, c instructions.SourcesAndDest, sourceS
 	var a *llb.FileAction
 
 	for _, src := range c.Sources() {
-		commitMessage.WriteString(" " + src)
 		if strings.HasPrefix(src, "http://") || strings.HasPrefix(src, "https://") {
 			if !isAddCommand {
 				return errors.New("source can't be a URL for COPY")
 			}
+
+			// To prevent invalidating cache, the URL in the command history is replaced with a placeholder
+			// because different hostnames can still serve the same content.
+			// Ideally this should contain a hash of the content.
+			commitMessage.WriteString(" <URL>")
 
 			// Resources from remote URLs are not decompressed.
 			// https://docs.docker.com/engine/reference/builder/#add
@@ -736,6 +740,7 @@ func dispatchCopyFileOp(d *dispatchState, c instructions.SourcesAndDest, sourceS
 				a = a.Copy(st, f, dest, opts...)
 			}
 		} else {
+			commitMessage.WriteString(" " + src)
 			opts := append([]llb.CopyOption{&llb.CopyInfo{
 				FollowSymlinks:      true,
 				CopyDirContentsOnly: true,
@@ -801,11 +806,15 @@ func dispatchCopy(d *dispatchState, c instructions.SourcesAndDest, sourceState l
 	}
 
 	for i, src := range c.Sources() {
-		commitMessage.WriteString(" " + src)
 		if strings.HasPrefix(src, "http://") || strings.HasPrefix(src, "https://") {
 			if !isAddCommand {
 				return errors.New("source can't be a URL for COPY")
 			}
+
+			// To prevent invalidating cache, the URL in the command history is replaced with a placeholder
+			// because different hostnames can still serve the same content.
+			// Ideally this should contain a hash of the content.
+			commitMessage.WriteString(" <URL>")
 
 			// Resources from remote URLs are not decompressed.
 			// https://docs.docker.com/engine/reference/builder/#add
@@ -824,6 +833,7 @@ func dispatchCopy(d *dispatchState, c instructions.SourcesAndDest, sourceState l
 			args = append(args, target)
 			mounts = append(mounts, llb.AddMount(path.Dir(target), llb.HTTP(src, llb.Filename(f), dfCmd(c)), llb.Readonly))
 		} else {
+			commitMessage.WriteString(" " + src)
 			d, f := splitWildcards(src)
 			targetCmd := fmt.Sprintf("/src-%d", i)
 			targetMount := targetCmd

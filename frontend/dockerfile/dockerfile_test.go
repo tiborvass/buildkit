@@ -1787,8 +1787,9 @@ func testDockerfileADDFromURL(t *testing.T, sb integration.Sandbox) {
 	modTime := time.Now().Add(-24 * time.Hour) // avoid falso positive with current time
 
 	resp := httpserver.Response{
-		Etag:    identity.NewID(),
-		Content: []byte("content1"),
+		Etag:         identity.NewID(),
+		LastModified: &modTime,
+		Content:      []byte("content1"),
 	}
 
 	resp2 := httpserver.Response{
@@ -1802,11 +1803,68 @@ func testDockerfileADDFromURL(t *testing.T, sb integration.Sandbox) {
 		"/":    resp2,
 	})
 	defer server.Close()
+	server2 := httpserver.NewTestServer(map[string]httpserver.Response{
+		// same content, same path, different hostname
+		// Note that same content with different URL paths produces different cache keys.
+		"/foo": resp,
+	})
+	defer server2.Close()
 
+	var prevDgst string
+	for i, s := range []*httpserver.TestServer{server, server2} {
+		t.Run(fmt.Sprintf("server%d", i), func(t *testing.T) {
+			dockerfile := []byte(fmt.Sprintf(`
+		FROM scratch
+		ADD %s /dest/foo
+		`, s.URL+"/foo"))
+
+			dir, err := tmpdir(
+				fstest.CreateFile("Dockerfile", dockerfile, 0600),
+			)
+			require.NoError(t, err)
+			defer os.RemoveAll(dir)
+
+			args, trace := f.DFCmdArgs(dir, dir)
+			defer os.RemoveAll(trace)
+
+			destDir, err := tmpdir()
+			require.NoError(t, err)
+			defer os.RemoveAll(destDir)
+
+			ociTar, err := ioutil.TempFile("", "oci.tar")
+			require.NoError(t, err)
+			defer os.Remove(ociTar.Name())
+			defer ociTar.Close()
+
+			cmd = sb.Cmd(args + fmt.Sprintf(" -o type=oci,dest=%s", ociTar.Name()))
+			out, err := cmd.CombinedOutput()
+			require.NoError(t, err, out)
+
+			dgst := getDigestFromOCI(t, ociTar)
+			require.NotEqual(t, dgst, "")
+			if prevDgst == "" {
+				prevDgst = dgst
+			} else {
+				// even with different hostnames in ADD url, second time should be cached
+				// tested by equal digests
+				require.Equal(t, dgst, prevDgst)
+			}
+
+			cmd := sb.Cmd(args + fmt.Sprintf(" -o type=local,dest=%s", destDir))
+			out, err := cmd.CombinedOutput()
+			require.NoError(t, err, out)
+
+			dt, err := ioutil.ReadFile(filepath.Join(destDir, "dest/foo"))
+			require.NoError(t, err)
+			require.Equal(t, []byte("content1"), dt)
+		})
+	}
+
+	// test the default properties
 	dockerfile := []byte(fmt.Sprintf(`
 FROM scratch
 ADD %s /dest/
-`, server.URL+"/foo"))
+`, server.URL+"/"))
 
 	dir, err := tmpdir(
 		fstest.CreateFile("Dockerfile", dockerfile, 0600),
@@ -1825,35 +1883,8 @@ ADD %s /dest/
 	err = cmd.Run()
 	require.NoError(t, err)
 
-	dt, err := ioutil.ReadFile(filepath.Join(destDir, "dest/foo"))
-	require.NoError(t, err)
-	require.Equal(t, []byte("content1"), dt)
-
-	// test the default properties
-	dockerfile = []byte(fmt.Sprintf(`
-FROM scratch
-ADD %s /dest/
-`, server.URL+"/"))
-
-	dir, err = tmpdir(
-		fstest.CreateFile("Dockerfile", dockerfile, 0600),
-	)
-	require.NoError(t, err)
-	defer os.RemoveAll(dir)
-
-	args, trace = f.DFCmdArgs(dir, dir)
-	defer os.RemoveAll(trace)
-
-	destDir, err = tmpdir()
-	require.NoError(t, err)
-	defer os.RemoveAll(destDir)
-
-	cmd = sb.Cmd(args + fmt.Sprintf(" --exporter=local --exporter-opt output=%s", destDir))
-	err = cmd.Run()
-	require.NoError(t, err)
-
 	destFile := filepath.Join(destDir, "dest/__unnamed__")
-	dt, err = ioutil.ReadFile(destFile)
+	dt, err := ioutil.ReadFile(destFile)
 	require.NoError(t, err)
 	require.Equal(t, []byte("content2"), dt)
 
@@ -4249,4 +4280,30 @@ func fixedWriteCloser(wc io.WriteCloser) func(map[string]string) (io.WriteCloser
 	return func(map[string]string) (io.WriteCloser, error) {
 		return wc, nil
 	}
+}
+
+func getDigestFromOCI(t *testing.T, ociTar *os.File) string {
+	tr := tar.NewReader(ociTar)
+	for {
+		hdr, err := tr.Next()
+		if err == io.EOF {
+			break // End of archive
+		}
+		require.NoError(t, err)
+		if hdr.Name != "index.json" {
+			continue
+		}
+		require.Equal(t, hdr.Typeflag, byte(tar.TypeReg))
+		var x struct {
+			Manifests []struct {
+				Digest string
+			}
+		}
+		err = json.NewDecoder(tr).Decode(&x)
+		require.NoError(t, err)
+		require.Equal(t, len(x.Manifests), 1)
+		return x.Manifests[0].Digest
+	}
+	t.Fatal("could not find digest in oci tar")
+	return ""
 }
