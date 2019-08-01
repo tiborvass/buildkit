@@ -636,17 +636,19 @@ RUN e="300:400"; p="/file"                         ; a=` + "`" + `stat -c "%u:%g
 func testCopyWildcardCache(t *testing.T, sb integration.Sandbox) {
 	f := getFrontend(t, sb)
 
-	dockerfile := []byte(`
+	dockerfile := func(foo string) []byte {
+		return []byte(fmt.Sprintf(`
 FROM busybox AS base
-COPY foo* files/
+COPY %s files/
 RUN cat /dev/urandom | head -c 100 | sha256sum > unique
 COPY bar files/
 FROM scratch
 COPY --from=base unique /
-`)
+`, foo))
+	}
 
 	dir, err := tmpdir(
-		fstest.CreateFile("Dockerfile", dockerfile, 0600),
+		fstest.CreateFile("Dockerfile", dockerfile("foo*"), 0600),
 		fstest.CreateFile("foo1", []byte("foo1-data"), 0600),
 		fstest.CreateFile("foo2", []byte("foo2-data"), 0600),
 		fstest.CreateFile("bar", []byte("bar-data"), 0600),
@@ -678,6 +680,8 @@ COPY --from=base unique /
 
 	dt, err := ioutil.ReadFile(filepath.Join(destDir, "unique"))
 	require.NoError(t, err)
+
+	err = ioutil.WriteFile(filepath.Join(dir, "Dockerfile"), dockerfile("foo1 foo2"), 0600)
 
 	err = ioutil.WriteFile(filepath.Join(dir, "bar"), []byte("bar-data-mod"), 0600)
 	require.NoError(t, err)
