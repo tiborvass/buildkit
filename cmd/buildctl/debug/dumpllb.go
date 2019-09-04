@@ -1,12 +1,14 @@
 package debug
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"io"
 	"os"
 	"strings"
 
+	"github.com/gogo/protobuf/jsonpb"
 	"github.com/moby/buildkit/client/llb"
 	"github.com/moby/buildkit/solver/pb"
 	digest "github.com/opencontainers/go-digest"
@@ -60,6 +62,45 @@ type llbOp struct {
 	Op         pb.Op
 	Digest     digest.Digest
 	OpMetadata pb.OpMetadata
+}
+
+type llbOpJSON struct {
+	Op         json.RawMessage
+	Digest     digest.Digest
+	OpMetadata json.RawMessage
+}
+
+func (s llbOp) MarshalJSON() ([]byte, error) {
+	var x llbOpJSON
+	m := jsonpb.Marshaler{}
+	var opBuf bytes.Buffer
+	if err := m.Marshal(&opBuf, &s.Op); err != nil {
+		return nil, errors.WithStack(err)
+	}
+	var mdBuf bytes.Buffer
+	if err := m.Marshal(&mdBuf, &s.OpMetadata); err != nil {
+		return nil, errors.WithStack(err)
+	}
+	x.Op = json.RawMessage(opBuf.Bytes())
+	x.OpMetadata = json.RawMessage(mdBuf.Bytes())
+	b, err := json.Marshal(x)
+	if err != nil {
+		return nil, errors.WithStack(err)
+	}
+	return b, nil
+}
+
+func (s *llbOp) UnmarshalJSON(p []byte) error {
+	var x llbOpJSON
+	if err := json.Unmarshal(p, &x); err != nil {
+		return errors.WithStack(err)
+	}
+	s.Digest = x.Digest
+	u := jsonpb.Unmarshaler{}
+	if err := u.Unmarshal(bytes.NewReader([]byte(x.Op)), &s.Op); err != nil {
+		return errors.WithStack(err)
+	}
+	return errors.WithStack(u.Unmarshal(bytes.NewReader([]byte(x.OpMetadata)), &s.OpMetadata))
 }
 
 func loadLLB(r io.Reader) ([]llbOp, error) {

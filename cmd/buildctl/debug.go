@@ -10,6 +10,7 @@ var debugCommand = cli.Command{
 	Usage: "debug utilities",
 	Subcommands: []cli.Command{
 		debug.DumpLLBCommand,
+		debug.JSON2LLBCommand,
 		debug.DumpMetadataCommand,
 		debug.WorkersCommand,
 	},
