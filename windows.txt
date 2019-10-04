@@ -1,0 +1,12 @@
+$env:DOCKER_WINDOWS_CONTAINERD_RUNTIME=1
+$env:Path = "C:\Users\Administrator\docker;C:\go\bin;C:\Windows\system32;C:\Windows;C:\Windows\System32\Wbem;C:\Windows\System32\WindowsPowerShell\v1.0\;C:\Windows\System32\OpenSSH\;C:\Program Files\Amazon\cfn-bootstrap\;C:\Windows\system32\config\systemprofile\AppData\Local\Microsoft\WindowsApps;C:\Program Files\Docker;C:\Program Files\docker;C:\Users\Administrator\AppData\Local\Microsoft\WindowsApps;;C:\Users\Administrator\Ubuntu"
+
+Stop-Service docker
+
+Start-Job { containerd.exe --address=//./pipe/containerd-containerd 2> containerd.log }
+
+start-job { buildkitd.exe --containerd-worker-addr=//./pipe/containerd-containerd --addr=npipe:////./pipe/buildkitd }
+
+[System.IO.Directory]::GetFiles("//./pipe/")
+
+buildctl.exe du

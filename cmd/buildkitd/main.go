@@ -10,6 +10,7 @@ import (
 	"os"
 	"os/user"
 	"path/filepath"
+	"runtime"
 	"sort"
 	"strconv"
 	"strings"
@@ -174,7 +175,7 @@ func main() {
 	app.Flags = append(app.Flags, appFlags...)
 
 	app.Action = func(c *cli.Context) error {
-		if os.Geteuid() != 0 {
+		if runtime.GOOS != "windows" && os.Geteuid() != 0 {
 			return errors.New("rootless mode requires to be executed as the mapped root in a user namespace; you may use RootlessKit for setting up the namespace")
 		}
 		ctx, cancel := context.WithCancel(appcontext.Context())

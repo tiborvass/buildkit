@@ -1,4 +1,4 @@
-// +build linux,!no_containerd_worker
+// +build !no_containerd_worker
 
 package main
 
@@ -236,7 +236,10 @@ func validContainerdSocket(socket string) bool {
 		// FIXME(AkihiroSuda): prohibit tcp?
 		return true
 	}
-	socketPath := strings.TrimPrefix(socket, "unix://")
+	socketPath := socket
+	if strings.HasPrefix(socket, "unix://") {
+		socketPath = strings.TrimPrefix(socket, "unix://")
+	}
 	if _, err := os.Stat(socketPath); os.IsNotExist(err) {
 		// FIXME(AkihiroSuda): add more conditions
 		logrus.Warnf("skipping containerd worker, as %q does not exist", socketPath)

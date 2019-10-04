@@ -109,6 +109,7 @@ COPY --from=buildctl /usr/bin/buildctl /
 
 FROM scratch AS binaries-windows
 COPY --from=buildctl /usr/bin/buildctl /buildctl.exe
+COPY --from=buildkitd /usr/bin/buildkitd /buildkitd.exe
 
 FROM binaries-$TARGETOS AS binaries
 
@@ -137,14 +138,20 @@ RUN apt-get install -y --no-install-recommends btrfs-progs libbtrfs-dev
 WORKDIR /go/src/github.com/containerd/containerd
 
 FROM containerd-base AS containerd
+ARG TARGETPLATFORM
 ARG CONTAINERD_VERSION
 RUN --mount=from=containerd-src,src=/usr/src/containerd,readwrite --mount=target=/root/.cache,type=cache \
   git fetch origin \
   && git checkout -q "$CONTAINERD_VERSION" \
   && make bin/containerd \
-  && make bin/containerd-shim \
   && make bin/ctr \
   && mv bin /out
+# disabled only because i just wanted windows
+#  && make bin/containerd-shim 
+
+FROM scratch AS containerd-windows
+COPY --from=containerd /out/containerd* /usr/bin/
+COPY --from=containerd /out/ctr.exe /usr/bin/
 
 # containerd v1.2 for integration tests
 FROM containerd-base as containerd-old
@@ -189,7 +196,7 @@ FROM binaries AS buildkit-buildkitd-darwin
 
 FROM binaries AS buildkit-buildkitd-windows
 # this is not in binaries-windows because it is not intended for release yet, just CI
-COPY --from=buildkitd /usr/bin/buildkitd /buildkitd.exe
+#COPY --from=buildkitd /usr/bin/buildkitd /buildkitd.exe
 
 FROM buildkit-buildkitd-$TARGETOS AS buildkit-buildkitd
 
