@@ -656,6 +656,14 @@ func dispatchRun(d *dispatchState, c *instructions.RunCommand, proxy *llb.ProxyE
 		opt = append(opt, networkOpt)
 	}
 
+	noCacheOpt, err := dispatchRunNoCache(c)
+	if err != nil {
+		return err
+	}
+	if noCacheOpt != nil {
+		opt = append(opt, noCacheOpt)
+	}
+
 	shlex := *dopt.shlex
 	shlex.RawQuotes = true
 	shlex.SkipUnsetEnv = true
